@@ -1,15 +1,15 @@
 {
   "test_set": "./data/camcan/filenames_test.tsv",
-  "task_model": "/vol/biomedic2/rdr16/domain_adaptation/output/DA_classifier_sex_CamCAN_UKBB_STN_affine_L_0.0001_E_50_B_16_Cyc_50_GL_bce_IL_l1_DL_bce_A_1/model/val_err_0.79464_epoch_015_classifier_A2B.pt",
-  "itn_path": "/vol/biomedic2/rdr16/domain_adaptation/output/DA_classifier_sex_CamCAN_UKBB_STN_affine_L_0.0001_E_50_B_16_Cyc_50_GL_bce_IL_l1_DL_bce_A_1/model/val_err_0.79464_epoch_015_itn_A2B.pt",
-  "stn": "affine",
-  "stn_path": "/vol/biomedic2/rdr16/domain_adaptation/output/DA_classifier_sex_CamCAN_UKBB_STN_affine_L_0.0001_E_50_B_16_Cyc_50_GL_bce_IL_l1_DL_bce_A_1/model/val_err_0.79464_epoch_015_stn_A2B.pt",
+  "task_model": "./task_models/DA_regressor_age_CamCAN_L_5e-05_E_100_B_8_nf_4_A_1/model/val_err_0.00814_epoch_095_regressor_A2B.pt",
+  "itn_path": "./output/DA_classifier_sex_CamCAN_UKBB_STN_affine_L_0.0001_E_50_B_16_Cyc_50_GL_bce_IL_l1_DL_bce_A_1/model/val_err_0.79464_epoch_015_itn_A2B.pt",
+  "stn": 0,
+  "stn_path": "./output/DA_classifier_sex_CamCAN_UKBB_STN_affine_L_0.0001_E_50_B_16_Cyc_50_GL_bce_IL_l1_DL_bce_A_1/model/val_err_0.79464_epoch_015_stn_A2B.pt",
   "max_displacement": 0.1,
   "cp_spacing": [8, 8, 8],
   "normalizer": "tanh",
   "input_shape": [64, 64, 64],
   "thresholds": [0.01, 0.05, 0.10],
-  "label_key": "sex",
+  "label_key": "age",
   "num_classes": 1,
   "nf": 6
 }

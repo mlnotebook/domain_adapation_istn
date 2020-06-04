@@ -426,7 +426,7 @@ def train(args, config, remote=False):
                         error_val_A_base = error_val_A_base / num_images_val_A_base
                         error_val_B_base = error_val_B_base / num_images_val_B_base
 
-                    print('VAL Epo:{:3d} A0/A/A2B[{:.4f}/{:.4f}/{:.4f}] B0/B/Del[{:.4f}/{:.4f}/{:.4f}] Best[B]:[{:.4f}]'
+                    logging.info('VAL Epo:{:3d} A0/A/A2B[{:.4f}/{:.4f}/{:.4f}] B0/B/Del[{:.4f}/{:.4f}/{:.4f}] Best[B]:[{:.4f}]'
                                  .format(epoch,
                                          error_val_A_base, error_val_A, error_val_A2B,
                                          error_val_B_base, error_val_B, np.abs(error_val_B_base - error_val_B),

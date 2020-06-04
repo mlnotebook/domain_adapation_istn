@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 def initialize_weights(model):
     """ Initialize the weights of the convolutional and batch normalization layers of a PyTorch model.
@@ -49,6 +50,9 @@ def get_regressor_output(model, images, labels=None, thresholds=None):
     model.eval()
     output = model(images)
 
+    if len(images) == 1:
+        output = output.unsqueeze(0)
+
     # Get Mean Absolute Error
     if labels is not None:
         abs_errors = torch.abs(labels - output)
@@ -65,7 +69,7 @@ def get_regressor_output(model, images, labels=None, thresholds=None):
             return output, mae, [], abs_errors
 
     else:
-        return output, [], [], abs_errors
+        return output, [], [], []
 
 
 
@@ -91,4 +95,4 @@ def get_classifier_output(model, images, labels):
     else:
         correct_results = []
 
-    return output, correct_results, [], []
+    return output, correct_results, [], prediction

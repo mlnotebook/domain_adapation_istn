@@ -28,7 +28,6 @@ def infer(args, remote=False):
     Args:
         required:
             args.dev: int - the device to use. If CUDA is not available, CPU is used.
-            args.batch_size: int - the size of the batch to feed to the model.
             args.model_type: str - `regressor` or `classifier`, the type of model being evaluated.
             args.test_set: str - path to the .csv file required for the DataHarmonizationDataset loader.
             args.num_dataset_workers: int - the number of threads to spawn for data loading and processing.
@@ -48,8 +47,7 @@ def infer(args, remote=False):
         if model_type == `classification`: accuracy: float - the classification accuracy.
     """
 
-    assert (args.batch_size > 0), "`batch_size` should be an integer greater than 0."
-    assert (args.model_type in ['regressor', 'classifier']),\
+    assert (args.model_type in ['regressor', 'classifier']), \
         "`model_type` should be `classifier` or `regressor`."
     assert (os.path.exists(args.task_model)), "Model .pt does not exist at {}".format(args.task_model)
     assert (os.path.exists(args.test_set)), "Dataset does not exist at {}".format(args.test_set)
@@ -129,6 +127,7 @@ def infer(args, remote=False):
     dataset_total_err = 0.0
     dataset_abs_errors = []
     dataset_outputs = []
+    dataset_labels = []
     dataset_correct_class_results = 0
     dataset_correct_reg_results = np.zeros(len(args.thresholds)).astype(int)
 
@@ -145,40 +144,56 @@ def infer(args, remote=False):
                 images = stn(images)
 
             if args.model_type == 'regressor':
-                batch_output, batch_err, batch_correct_results, abs_errors = get_regressor_output(task,images,labels, thresholds=args.thresholds)
+                batch_output, batch_err, batch_correct_results, abs_errors = get_regressor_output(task, images, labels, thresholds=args.thresholds)
 
                 if labels is not None:
+                    dataset_labels += list([labels.item()])
                     dataset_total_err += batch_err
-                dataset_abs_errors += list(abs_errors)
-                dataset_correct_reg_results += np.array(batch_correct_results).astype(int)
+                    dataset_abs_errors += list([abs_errors.item()])
+                    dataset_correct_reg_results += np.array(batch_correct_results).astype(int)
+                dataset_outputs += list([batch_output.item()])
             else:
-                batch_output, batch_correct_results, _, _ = get_classifier_output(task, images, labels)
-
-                dataset_outputs += list([batch_output])
-                dataset_correct_class_results += batch_correct_results
+                batch_output, batch_correct_results, _, batch_predictions = get_classifier_output(task, images, labels)
+                dataset_outputs += list([batch_predictions.item()])
+                if labels is not None:
+                    dataset_labels += list([labels.item()])
+                    dataset_correct_class_results += batch_correct_results
 
     # Gather results
-    if args.model_type == 'regressor':
-        if labels is not None:
+    if labels is not None:
+        if args.model_type == 'regressor':
             dataset_average_err = dataset_total_err / len(dataset)
             printhead('Average MAE = {}'.format(dataset_average_err))
 
-        correctthresh = [float(result) / len(dataset) for result in dataset_correct_results]
+            correctthresh = [float(result) / len(dataset) for result in dataset_correct_reg_results]
 
-        if args.graphs:
-            printhead('Generating graphs.')
-            # Histogram of absolute errors
-            plot_mae(np.array(dataset_abs_errors), output_dir=args.output_dir)
-            # Histogram of absolute errors
-            plot_cumulative_threshold(correctthresh, args.thresholds, output_dir=args.output_dir)
+            if args.graphs:
+                printhead('Generating graphs.')
+                # Histogram of absolute errors
+                plot_mae(np.array(dataset_abs_errors), output_dir=args.output_dir)
+                # Histogram of absolute errors
+                plot_cumulative_threshold(correctthresh, args.thresholds, output_dir=args.output_dir)
 
-        return dataset_average_err
+            if args.display_outputs:
+                for sample in zip(dataset_labels, dataset_outputs):
+                    print('({:.02f}, {:.02f}) {:.02f}'.format(sample[0], sample[1], np.abs(sample[1] - sample[0])))
+
+        else:
+            dataset_accuracy = dataset_correct_class_results / len(dataset)
+            printhead('Accuracy = {:.04f}'.format(dataset_accuracy))
+
+            if args.display_outputs:
+                for sample in zip(dataset_labels, dataset_outputs):
+                    if sample[0] == sample[1]:
+                        print(sample, '/')
+                    else:
+                        print(sample, 'X')
 
     else:
-        dataset_accuracy = dataset_correct_class_results / len(dataset)
-        printhead('Accuracy = {:.04f}'.format(dataset_accuracy))
-        return dataset_accuracy
-
+        if args.model_type == 'regressor':
+            print(dataset_abs_errors)
+        else:
+            print(dataset_outputs)
 
 if __name__ == '__main__':
 
@@ -196,6 +211,8 @@ if __name__ == '__main__':
                         help='verbose or not')
     parser.add_argument('--graphs', action='store_true',
                         help='save graphs for MAE etc.')
+    parser.add_argument('--display_outputs', action='store_true',
+                        help='print the labels and predictions to screen.')
     parser.add_argument('--num_dataset_workers', default=4, type=int,
                         help='Number of threads on which to load and process the dataset.')
     parser.add_argument('--model_type', required=True, choices={'classifier', 'regressor'}, type=str,
@@ -217,7 +234,6 @@ if __name__ == '__main__':
     assert (type(args.task_model) == str) & (os.path.exists(args.task_model)), "Model .pt does not exist at {}".format(args.task_model)
 
     # Model Parameters
-    args.batch_size = config['batch_size']
     args.normalizer = torch.tanh if config['normalizer'] == 'tanh' else None
     args.input_shape = config['input_shape']
 
@@ -243,5 +259,5 @@ if __name__ == '__main__':
     rootLogger = logging.getLogger()
     rootLogger.setLevel(logging.DEBUG)
 
-    average_error = infer(args)
+    infer(args)
     close_loggers(logging.getLogger(''))

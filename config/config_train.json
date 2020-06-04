@@ -3,9 +3,9 @@
   "siteA_train": "./data/camcan/filenames_train.tsv",
   "siteA_val": "./data/camcan/filenames_test.tsv",
   "siteB_name": "UKBB",
-  "siteB_train": "/vol/biomedic2/rdr16/pymira/pymira/apps/data_harmonization/data5/ukbb/filenames_train.tsv",
-  "siteB_val": "/vol/biomedic2/rdr16/pymira/pymira/apps/data_harmonization/data5/ukbb/filenames_test.tsv",
-  "task_model": "/vol/biomedic2/rdr16/pymira/pymira/apps/data_harmonization/output_brain/phase1_ADVDIRECT/Phase1_ADVDIRECT_camcan_ukbb_I_super_S_spline_MI_0_MG_0_MD_0_L_0.0001_E_200_B_8_R_0.2_T_itn_Sp_8_l1_100_PN_1_PS_64_GL_bcelog_IL_l1_DL_bcelog_MaxD_0.1_A_1_RL_1_P_0/model/classifier.pt",
+  "siteB_train": "./data/ukbb/filenames_train.tsv",
+  "siteB_val": "./data/ukbb/filenames_test.tsv",
+  "task_model": 0
   "finetune": 0,
   "label_key": "age",
   "augmentation": 1,
