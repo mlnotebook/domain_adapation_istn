@@ -1,0 +1,13 @@
+{
+  "train_set": "./data/camcan/filenames_train.tsv",
+  "test_set": "./data/camcan/filenames_test.tsv",
+  "batch_size": 8,
+  "learning_rate": 0.0001,
+  "val_interval": 5,
+  "epochs": 100,
+  "normalizer": "tanh",
+  "input_shape": [64, 64, 64],
+  "label_key": "sex",
+  "num_classes": 1,
+  "nf": 6
+}
