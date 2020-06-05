@@ -25,7 +25,7 @@ Robinson, R. et al. (2020). _Image-level Harmonization of Multi-Site Data using 
 
 [2] Castro, D. C., Tan, J., Kainz, B., Konukoglu, E., & Glocker, B. (2019). _Morpho-MNIST: Quantitative Assessment and Diagnostics for Representation Learning._ Journal of Machine Learning Research, 20(178), 1–29. https://doi.org/http://hdl.handle.net/10044/1/63396
 
---
+---
 
 # Usage
 
@@ -33,15 +33,17 @@ Scripts for training the ISTN and task models are provided as well as an inferen
 
 1. `train_task_model.py` - Train a task model $Task\sb{S}$ on the source domain `S`.
 2. `inference.py` - Run task model inference on `S` and target domain `T`. Usually $Task\sb{S}(T) < Task\sb{S}(T)$ due to domain shift.
-2. `da_adversarial_training.py` - Train the ISTN to transform `S` to `T` giving `S2T`. A new task model $Task\sb{A2B}$ is trained either from scratched or finetuned from $Task\sb{S}$. 
-3. `inference.py` - Run new task model inferenece on `T`: usually model performance is recovered such that $Task\sb{A2B}(T) > $Task\sb{S}(T)$.
+3. `da_unidirectional_training.py` - Train the ISTN to transform `S` to `T` giving `S2T`. A new task model $Task\sb{A2B}$ is trained either from scratched or finetuned from $Task\sb{S}$. 
+4. `da_bidirectional_training.py` - Same as `unidirectional` but uses 2 ISTNs to train like CycleGAN. 
+5. `inference.py` - Run new task model inferenece on `T`: usually model performance is recovered such that $Task\sb{A2B}(T) > $Task\sb{S}(T)$.
 
 ## Config Files
 The config files in the `config` folder contain all of the variables that are passed to each script. Each config is a `.json` file with keys and values.
 
 1. `config_task_training.json` - variables for training the initial task model.
-2. `config_istn_training.json` - variables for training the ISTN and new task model.
-3. `config_inference.json` - variables for performing intererence.
+2. `config_train_unidirectional.json` - variables for training the ISTN and new task model with only 1 ISTN.
+3. `config_train_bidirectional.json` - variables for training the ISTN and new task model with 2 ISTNs (CycleGAN).
+4. `config_inference.json` - variables for performing intererence.
 
 ## Training Task Model (`train_task_model.py`)
 The script is invoked with the required options
@@ -69,7 +71,7 @@ python ./train_task_model.py --model_type classifier
 | `epochs` | `int` | The total number of training epochs. |
 
 
-## Training ISTN (`da_adversarial_training.py`)
+## Training ISTN (`da_unidirectional_training.py` or `da_bidirectional_training.py`)
 The script is invoked with the required options
 * `--model_type`: {`classifier`, `regressor`} - the model type to be trained. The appropriate architecture is automatically selected.
 
