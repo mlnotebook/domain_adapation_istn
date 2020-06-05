@@ -22,7 +22,7 @@ from utils.training_utils import printhead, EarlyStop
 
 
 def train(args, config, remote=False):
-    printhead('Starting Training.')
+    printhead('Starting BIDIRECTIONAL Training.')
 
     # Setup devices
     if args.seed: torch.manual_seed(args.seed)
@@ -90,68 +90,95 @@ def train(args, config, remote=False):
     logging.info('Task Model')
 
     ##### Load the DISCRIMINATOR model #####
-    discriminator = Discriminator().to(device)
-    discriminator.apply(initialize_weights)
-    discriminator.train()
-    discriminator_parameters = list(discriminator.parameters())
-    set_requires_grad(discriminator, True)
-    logging.info('Discriminator')
+    discriminator_A = Discriminator().to(device)
+    discriminator_B = Discriminator().to(device)
+    discriminator_A.apply(initialize_weights)
+    discriminator_B.apply(initialize_weights)
+    discriminator_A.train()
+    discriminator_B.train()
+    discriminator_parameters_A = list(discriminator_A.parameters())
+    discriminator_parameters_B = list(discriminator_B.parameters())
+    set_requires_grad(discriminator_A, True)
+    set_requires_grad(discriminator_B, True)
+    logging.info('Discriminator A')
+    logging.info('Discriminator B')
 
-    ##### Load the ITN #####
+
+    ##### Load the ITNs #####
     istn_A2B_parameters = []
+    istn_B2A_parameters = []
     itn_A2B = ITN3D(nf=args.nf).to(device)
+    itn_B2A = ITN3D(nf=args.nf).to(device)
     istn_A2B_parameters += list(itn_A2B.parameters())
+    istn_B2A_parameters += list(itn_B2A.parameters())
     itn_A2B.train()
+    itn_B2A.train()
     itn_A2B.apply(initialize_weights)
+    itn_B2A.apply(initialize_weights)
+    set_requires_grad(itn_B2A, True)
     set_requires_grad(itn_A2B, True)
-    logging.info('ITN')
+    logging.info('ITN A2B')
+    logging.info('ITN B2A')
 
-    ##### Load the STN #####
+    ##### Load the STNs #####
     stn_A2B = None
+    stn_B2A = None
     if args.stn:
         assert (args.stn in ['affine', 'bspline']), "STN should be one of `bspline` or `spline`."
         if args.stn == 'bspline':
-            stn_A2B = BSplineSTN3D(input_size=args.input_shape[0],
-                               device=device,
-                               control_point_spacing=(args.cp_spacing[0],
-                                                      args.cp_spacing[1],
-                                                      args.cp_spacing[2]),
-                               max_displacement=args.max_displacement,
-                               nf=args.nf).to(device)
+            kwargs = {"input_size": args.input_shape[0],
+                      "device": device,
+                      "control_point_spacing": (args.cp_spacing[0],
+                                                args.cp_spacing[1],
+                                                args.cp_spacing[2]),
+                      "max_displacement": args.max_displacement,
+                      "nf": args.nf}
+            stn_A2B = BSplineSTN3D(**kwargs).to(device)
+            stn_B2A = BSplineSTN3D(**kwargs).to(device)
         if args.stn == 'affine':
-            stn_A2B = AffineSTN3D(input_size=args.input_shape[0],
-                                  device=device,
-                                  input_channels=1,
-                                  nf=args.nf).to(device)
+            kwargs = {"input_size": args.input_shape[0],
+                      "device": device,
+                      "input_channels": 1,
+                      "nf": args.nf}
+            stn_A2B = AffineSTN3D(**kwargs).to(device)
+            stn_B2A = AffineSTN3D(**kwargs).to(device)
+
         istn_A2B_parameters += list(stn_A2B.parameters())
+        istn_B2A_parameters += list(stn_B2A.parameters())
         stn_A2B.train()
+        stn_B2A.train()
         # Weights are not initialized. Auto initialized in STN to perform identity transform.
         set_requires_grad(stn_A2B, True)
-    logging.info('STN ({})'.format(args.stn))
+        set_requires_grad(stn_B2A, True)
+    logging.info('STN A2B ({})'.format(args.stn))
+    logging.info('STN B2A ({})'.format(args.stn))
 
     ##### Create OPTIMIZERS #####
-    optimizer_discriminator = torch.optim.Adam(filter(lambda p: p.requires_grad, discriminator_parameters), lr=args.learning_rate, betas=(0.5, 0.999))
-    optimizer_istn = torch.optim.Adam(filter(lambda p: p.requires_grad, istn_A2B_parameters), lr=args.learning_rate, betas=(0.5, 0.999))
+    optimizer_discriminator_A = torch.optim.Adam(filter(lambda p: p.requires_grad, discriminator_parameters_A), lr=args.learning_rate, betas=(0.5, 0.999))
+    optimizer_discriminator_B = torch.optim.Adam(filter(lambda p: p.requires_grad, discriminator_parameters_B), lr=args.learning_rate, betas=(0.5, 0.999))
+    optimizer_istn = torch.optim.Adam(filter(lambda p: p.requires_grad, istn_A2B_parameters + istn_B2A_parameters), lr=args.learning_rate, betas=(0.5, 0.999))
     optimizer_task = torch.optim.Adam(filter(lambda p: p.requires_grad, task_parameters), lr=0.0001)
 
         
     ##### Initialize TRAINING Variables #####
     loss_train_istn_log = []
-    loss_train_discriminator_log = []
+    loss_train_discriminator_A_log = []
+    loss_train_discriminator_B_log = []
     loss_train_task_log = []
     err_train_task_A_log = []
     err_train_task_B_log = []
     err_train_task_A2B_log = []
     early_stopping_counter = 0
     epoch_times = []
-    total_istn_A2B_loss = 0.0
-    total_discriminator_loss = 0.0
+    total_istn_loss = 0.0
+    total_discriminator_A_loss = 0.0
+    total_discriminator_B_loss = 0.0
     total_task_loss = 0.0
-
 
     ##### Initialize VALIDATION Variables #####
     loss_val_istn_log = []
-    loss_val_discriminator_log = []
+    loss_val_discriminator_A_log = []
+    loss_val_discriminator_B_log = []
     loss_val_task_log = []
     err_val_task_A_log = []
     err_val_task_B_log = []
@@ -160,7 +187,7 @@ def train(args, config, remote=False):
     best_val_error = [0, -1]
     error_val_A_base, error_val_B_base = 0.0, 0.0
     num_images_val_A_base, num_images_val_B_base = 0, 0
-    total_istn_val_loss, total_discriminator_val_loss, total_task_val_loss = 0.0, 0.0, 0.0
+    total_istn_val_loss, total_discriminator_A_val_loss, total_discriminator_B_val_loss, total_task_val_loss = 0.0, 0.0, 0.0, 0.0
     val_epochs = []
 
     ##### Create Soft Label Generators
@@ -170,14 +197,18 @@ def train(args, config, remote=False):
     printhead('TRAINING LOOP')
     for epoch in range(0, args.epochs):
         epoch_start = time.time()
-        error_train_A2B, error_train_A, error_train_B, num_images_A, num_images_B, num_images_A2B = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        error_train_A2B, error_train_B2A, error_train_A, error_train_B, num_images_A, num_images_B, num_images_A2B = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
         # Set the ISTN and task model to training mode
         itn_A2B.train()
+        itn_B2A.train()
         set_requires_grad(itn_A2B, True)
+        set_requires_grad(itn_B2A, True)
         if args.stn:
             stn_A2B.train()
+            stn_B2A.train()
             set_requires_grad(stn_A2B, True)
+            set_requires_grad(stn_B2A, True)
 
         task.train()
         set_requires_grad(task, True)
@@ -199,48 +230,92 @@ def train(args, config, remote=False):
                 B_orig = B.clone()
                 A_orig = A.clone()
 
-                # GA2B(A) - domain shift
+                ### Forward ISTN ###
                 A2B = itn_A2B(A)
                 A2B = stn_A2B(A2B.to(device)) if args.stn else A2B
-                # GA2B(B) - identity
-                B2B = itn_A2B(B)
-                B2B = stn_A2B(B2B.to(device)) if args.stn else B2B
-
-                # Create clones of the original data for use later
                 A2B_orig = A2B.clone()
 
+                B2A = itn_B2A(B)
+                B2A = stn_B2A(B2A.to(device)) if args.stn else B2A
+                B2A_orig = B2A.clone()
+
+                ### Identity ISTN ###
+                A2A = itn_A2B(A.detach())
+                A2A = stn_A2B(A2A.to(device)) if args.stn else A2A
+                A2A_orig = A2A.clone()
+
+                B2B = itn_A2B(B.detach())
+                B2B = stn_A2B(B2B.to(device)) if args.stn else B2B
+                B2B_orig = B2B.clone()
+
+                ### Cycle ISTN ###
+                A2B2A = itn_B2A(A2B)
+                A2B2A = stn_B2A(A2B2A.to(device)) if args.stn else A2B2A
+                A2B2A_orig = A2B2A.clone()
+
+                B2A2B = itn_A2B(B2A)
+                B2A2B = stn_A2B(B2A2B).to(device) if args.stn else B2A2B
+                B2A2B_orig = B2A2B.clone()
+
                 ##### CALCULATE GENERATOR LOSSES #####
-                # GAN loss
                 optimizer_istn.zero_grad()
-                set_requires_grad(discriminator, False) #discriminator is not being updated here.
-                output_Dis_A2B = discriminator(A2B, return_logits=0)
-                output_Dis_A2B = output_Dis_A2B.view(A2B.size(0), -1)
-                Dis_A2B_High = high.sample(output_Dis_A2B.shape).to(device)
-                discriminator_A2B_gan_loss = args.gan_loss(output_Dis_A2B, Dis_A2B_High)
+                set_requires_grad(discriminator_A, False) #discriminator is not being updated here.
+                set_requires_grad(discriminator_B, False)  # discriminator is not being updated here.
+
+                output_Dis_A_A2B = discriminator_A(A2B, return_logits=0)
+                output_Dis_A_A2B = output_Dis_A_A2B.view(A2B.size(0), -1)
+                Dis_A_A2B_High = high.sample(output_Dis_A_A2B.shape).to(device)
+                discriminator_A_A2B_gan_loss = args.gan_loss(output_Dis_A_A2B, Dis_A_A2B_High)
+                output_Dis_B_B2A = discriminator_B(B2A, return_logits=0)
+                output_Dis_B_B2A = output_Dis_B_B2A.view(B2A.size(0), -1)
+                Dis_B_B2A_High = high.sample(output_Dis_B_B2A.shape).to(device)
+                discriminator_B_B2A_gan_loss = args.gan_loss(output_Dis_B_B2A, Dis_B_B2A_High)
+
+                # GAN loss
+                gan_loss = 0.5 * (discriminator_A_A2B_gan_loss + discriminator_B_B2A_gan_loss)
                 # Identity loss
-                idt_B2B_loss = 0.5 * args.cyc_weight * args.idt_loss(B2B, B) if args.idt_loss is not None else 0
+                idt_loss = args.idt_loss(A2A, A) + args.idt_loss(B2B, B) if args.idt_loss is not None else 0
+                # Cycle Loss
+                cyc_loss = args.cyc_loss(A2B2A, A) + args.cyc_loss(B2A2B ,B)
                 # Total Loss
-                istn_A2B_loss = discriminator_A2B_gan_loss + idt_B2B_loss
-                # Perform OPTIMIZER UPDATE
-                istn_A2B_loss.backward()
+                istn_loss = gan_loss + (0.5 * args.cyc_weight * idt_loss) + (args.cyc_weight * cyc_loss)
+
+                # Perform ISTN UPDATE
+                istn_loss.backward()
                 optimizer_istn.step()
 
                 ##### CALCULATE DISCRIMINATOR LOSSES #####
-                optimizer_discriminator.zero_grad()
-                set_requires_grad(discriminator, True)
-                output_Dis_B = discriminator(B.detach(), return_logits=0)
-                output_Dis_B = output_Dis_B.view(B.size(0), -1)
-                Dis_B_High = high.sample(output_Dis_B.shape).to(device)
-                discriminator_B_loss = args.dis_loss(output_Dis_B, Dis_B_High)
+                optimizer_discriminator_A.zero_grad()
+                set_requires_grad(discriminator_A, True)
+                output_Dis_A_A = discriminator_A(A.detach(), return_logits=0)
+                output_Dis_A_A = output_Dis_A_A.view(A.size(0), -1)
+                Dis_A_High = high.sample(output_Dis_A_A.shape).to(device)
+                discriminator_A_A_loss = args.dis_loss(output_Dis_A_A, Dis_A_High)
 
-                output_Dis_A2B = discriminator(A2B.detach(), return_logits=0)
-                output_Dis_A2B = output_Dis_A2B.view(A2B.size(0), -1)
-                Dis_A2B_Low = low.sample(output_Dis_A2B.shape).to(device)
-                discriminator_A2B_loss = args.dis_loss(output_Dis_A2B, Dis_A2B_Low)
-                #Perform DISCRIMINATOR UPDATE
-                discriminator_loss = 0.5 * (discriminator_B_loss + discriminator_A2B_loss)
-                discriminator_loss.backward()
-                optimizer_discriminator.step()
+                output_Dis_A_B2A = discriminator_A(B2A.detach(), return_logits=0)
+                output_Dis_A_B2A = output_Dis_A_B2A.view(B2A.size(0), -1)
+                Dis_A_B2A_Low = low.sample(output_Dis_A_B2A.shape).to(device)
+                discriminator_A_B2A_loss = args.dis_loss(output_Dis_A_B2A, Dis_A_B2A_Low)
+
+                optimizer_discriminator_B.zero_grad()
+                set_requires_grad(discriminator_B, True)
+                output_Dis_B_B = discriminator_B(B.detach(), return_logits=0)
+                output_Dis_B_B = output_Dis_B_B.view(B.size(0), -1)
+                Dis_B_High = high.sample(output_Dis_B_B.shape).to(device)
+                discriminator_B_B_loss = args.dis_loss(output_Dis_B_B, Dis_B_High)
+
+                output_Dis_B_A2B = discriminator_A(A2B.detach(), return_logits=0)
+                output_Dis_B_A2B = output_Dis_B_A2B.view(A2B.size(0), -1)
+                Dis_B_A2B_Low = low.sample(output_Dis_B_A2B.shape).to(device)
+                discriminator_B_A2B_loss = args.dis_loss(output_Dis_B_A2B, Dis_B_A2B_Low)
+
+                #Perform DISCRIMINATOR UPDATEs
+                discriminator_A_loss = 0.5 * (discriminator_A_A_loss + discriminator_A_B2A_loss)
+                discriminator_A_loss.backward()
+                optimizer_discriminator_A.step()
+                discriminator_B_loss = 0.5 * (discriminator_B_B_loss + discriminator_B_A2B_loss)
+                discriminator_B_loss.backward()
+                optimizer_discriminator_B.step()
 
                 ##### Get TASK MODEL Outputs #####
                 optimizer_task.zero_grad()
@@ -257,8 +332,9 @@ def train(args, config, remote=False):
                 error_train_B += error_B_batch
                 error_train_A2B += error_A2B_batch
 
-                total_istn_A2B_loss += istn_A2B_loss.item()
-                total_discriminator_loss += discriminator_loss.item()
+                total_istn_loss += istn_loss.item()
+                total_discriminator_A_loss += discriminator_A_loss.item()
+                total_discriminator_B_loss += discriminator_A_loss.item()
                 total_task_loss += task_loss.item()
                 
                 num_images_A += A_orig.size(0)
@@ -266,12 +342,14 @@ def train(args, config, remote=False):
                 num_images_A2B += A2B_orig.size(0)
 
             ### LOG METRICS
-            total_istn_A2B_loss = total_istn_A2B_loss / num_images_A
-            total_discriminator_loss = total_discriminator_loss / num_images_A
+            total_istn_A2B_loss = total_istn_loss / num_images_A
+            total_discriminator_A_loss = total_discriminator_A_loss / num_images_A
+            total_discriminator_B_loss = total_discriminator_B_loss / num_images_A
             total_task_loss = total_task_loss / num_images_A
             
             loss_train_istn_log.append(total_istn_A2B_loss)
-            loss_train_discriminator_log.append(total_discriminator_loss)
+            loss_train_discriminator_A_log.append(total_discriminator_A_loss)
+            loss_train_discriminator_B_log.append(total_discriminator_B_loss)
             loss_train_task_log.append(total_task_loss)
 
             error_train_A = error_train_A / num_images_A
@@ -290,11 +368,13 @@ def train(args, config, remote=False):
             remaining_time = (config['epochs'] - epoch) * avg_epoch
             remaining_time = time.strftime('%Hh%Mm%Ss', time.gmtime(remaining_time))
 
-            logging.info('TRAIN Epo:{:03d} A2B: {:.4f} Dis: {:.4f} Tsk: {:.4f} A/A2B[{:.4f}/{:.4f}] B[{:.4f}] ETA: {}'
+            logging.info('TRAIN Epo:{:03d} Loss[ISTN/DA/DB/Tsk]:[{:.3f}/{:.3f}/{:.3f}/{:.3f}/] {}[A/A2B/B]:[{:.3f}/{:.3f}/{:.3f}] ETA: {}'
                   .format(epoch,
                   loss_train_istn_log[-1],
-                  loss_train_discriminator_log[-1],
+                  loss_train_discriminator_A_log[-1],
+                  loss_train_discriminator_B_log[-1],
                   loss_train_task_log[-1],
+                  'MAE' if args.model_type == 'regressor' else 'Acc',
                   error_train_A,
                   error_train_A2B,
                   error_train_B,
@@ -315,11 +395,14 @@ def train(args, config, remote=False):
                     num_images_val_A, num_images_val_B, num_images_val_A2B = 0, 0, 0
 
                     ### Set ALL MODELS TO EVAL
-                    discriminator.eval()
+                    discriminator_A.eval()
+                    discriminator_B.eval()
                     task.eval()
                     itn_A2B.eval()
+                    itn_B2A.eval()
                     if args.stn:
                         stn_A2B.eval()
+                        stn_B2A.eval()
 
                     for batch_idx, batch_samples in enumerate(zip(tqdm(dataloader_val_1, desc='Val', leave=False), cycle(dataloader_val_2))):
 
@@ -333,9 +416,31 @@ def train(args, config, remote=False):
                         A = args.normalizer(A)
                         B = args.normalizer(B)
 
-                        # Create clones of the original data for use later
-                        A_orig = A.clone()
-                        B_orig = B.clone()
+                        ### Save a sample of validation images on first step
+                        if epoch == 0 and batch_idx == 0 and (args.nii or args.png):
+                            save_tensor_sample(A, '{}_val_preITN_{}'.format(epoch, 'A'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(B, '{}_val_preITN_{}'.format(epoch, 'B'), args.samples_dir, nii=args.nii, png=args.png)
+
+                        ### Forward ISTN ###
+                        A2B = itn_A2B(A)
+                        A2B_postITN = A2B.clone()
+                        A2B = stn_A2B(A2B.to(device)) if args.stn else A2B
+                        A2B_postSTN = A2B.clone()
+
+                        B2A = itn_B2A(B)
+                        B2A_postITN = B2A.clone()
+                        B2A = stn_B2A(B2A.to(device)) if args.stn else B2A
+                        B2A_postSTN = B2A.clone()
+
+                        if batch_idx == 0  and (args.nii or args.png):
+                            save_tensor_sample(A2B_postITN, '{}_val_postITN_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(A2B_postITN - A, '{}_val_postITNdiff_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(B2A_postITN, '{}_val_postITN_{}'.format(epoch, 'B2A'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(B2A_postITN - B, '{}_val_postITNdiff_{}'.format(epoch, 'B2A'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(A2B_postSTN, '{}_val_postSTN_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(A2B_postSTN - A2B_postITN, '{}_val_postSTNdiff_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(B2A_postSTN, '{}_val_postSTN_{}'.format(epoch, 'B2A'), args.samples_dir, nii=args.nii, png=args.png)
+                            save_tensor_sample(B2A_postSTN - B2A_postITN, '{}_val_postSTNdiff_{}'.format(epoch, 'B2A'), args.samples_dir, nii=args.nii, png=args.png)
 
                         if epoch == 0:
                             # Get baselines on first epoch, and retain them for later
@@ -348,24 +453,6 @@ def train(args, config, remote=False):
                             num_images_val_A_base += A.size(0)
                             num_images_val_B_base += B.size(0)
 
-                        ### Save a sample of validation images on first step
-                        if epoch == 0 and batch_idx == 0 and (args.nii or args.png):
-                            save_tensor_sample(A, '{}_val_preITN_{}'.format(epoch, 'A'), args.samples_dir, nii=args.nii, png=args.png)
-
-                        A2B = itn_A2B(A)
-                        A2B_postITN = A2B.clone()
-
-                        if batch_idx == 0  and (args.nii or args.png):
-                            save_tensor_sample(A2B_postITN, '{}_val_postITN_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
-                            save_tensor_sample(A2B_postITN - A, '{}_val_postITNdiff_{}'.format(epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
-
-                        A2B = stn_A2B(A2B) if args.stn else A2B
-                        A2B_postSTN = A2B.clone()
-
-                        if batch_idx == 0  and (args.nii or args.png):
-                            save_tensor_sample(A2B_postSTN, '{}_val_postSTN_{}'.format( epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
-                            save_tensor_sample(A2B_postSTN - A2B_postITN, '{}_val_postSTNdiff_{}'.format( epoch, 'A2B'), args.samples_dir, nii=args.nii, png=args.png)
-
                         output_task_val_A_batch, error_val_A_batch, _, _ = get_task_output(task, A_orig, label_A)
                         output_task_val_B_batch, error_val_B_batch, _, _ = get_task_output(task, B_orig, label_B)
                         output_task_val_A2B_batch, error_val_A2B_batch, _, _ = get_task_output(task, A2B, label_A)
@@ -375,26 +462,65 @@ def train(args, config, remote=False):
                         error_val_A2B += error_val_A2B_batch
 
                         ##### Get Losses
-                        #ISTN
-                        output_Dis_val_A2B = discriminator(A2B.detach())
-                        output_Dis_val_A2B = output_Dis_val_A2B.view(A2B.size(0), -1)
-                        Dis_A2B_High = high.sample(output_Dis_val_A2B.shape).to(device)
-                        discriminator_A2B_gan_val_loss = args.gan_loss(output_Dis_val_A2B, Dis_A2B_High)
-                        idt_val_B2B_val_loss = 0.5 * args.cyc_weight * args.idt_loss(B2B, B) if args.idt_loss is not None else 0
-                        istn_val_loss = discriminator_A2B_gan_val_loss + idt_val_B2B_val_loss
-                        #DISCRIMINATOR
-                        output_Dis_val_B = discriminator(B.detach())
-                        output_Dis_val_B = output_Dis_val_B.view(B.size(0), -1)
-                        Dis_B_High = high.sample(output_Dis_val_B.shape).to(device)
-                        Dis_A2B_Low = low.sample(output_Dis_val_A2B.shape).to(device)
-                        discriminator_B_val_loss = args.dis_loss(output_Dis_val_B, Dis_B_High)
-                        discriminator_A2B_val_loss = args.dis_loss(output_Dis_val_A2B, Dis_A2B_Low)
-                        discriminator_val_loss = 0.5 * (discriminator_B_val_loss + discriminator_A2B_val_loss)
-                        #TASK
-                        task_val_loss = args.task_loss(output_task_val_A2B_batch, label_A.float())
+                        ### Identity ISTN ###
+                        A2A = itn_A2B(A.detach())
+                        A2A = stn_A2B(A2A.to(device)) if args.stn else A2A
+                        B2B = itn_A2B(B.detach())
+                        B2B = stn_A2B(B2B.to(device)) if args.stn else B2B
+                        ### Cycle ISTN ###
+                        A2B2A = itn_B2A(A2B)
+                        A2B2A = stn_B2A(A2B2A.to(device)) if args.stn else A2B2A
+                        B2A2B = itn_A2B(B2A)
+                        B2A2B = stn_A2B(B2A2B).to(device) if args.stn else B2A2B
+                        ##### CALCULATE ISTN LOSSES #####
+                        output_Dis_A_A2B = discriminator_A(A2B, return_logits=0)
+                        output_Dis_A_A2B = output_Dis_A_A2B.view(A2B.size(0), -1)
+                        Dis_A_A2B_High = high.sample(output_Dis_A_A2B.shape).to(device)
+                        discriminator_A_A2B_gan_loss = args.gan_loss(output_Dis_A_A2B, Dis_A_A2B_High)
+                        output_Dis_B_B2A = discriminator_B(B2A, return_logits=0)
+                        output_Dis_B_B2A = output_Dis_B_B2A.view(B2A.size(0), -1)
+                        Dis_B_B2A_High = high.sample(output_Dis_B_B2A.shape).to(device)
+                        discriminator_B_B2A_gan_loss = args.gan_loss(output_Dis_B_B2A, Dis_B_B2A_High)
+
+                        gan_loss = 0.5 * (discriminator_A_A2B_gan_loss + discriminator_B_B2A_gan_loss)
+                        idt_loss = args.idt_loss(A2A, A) + args.idt_loss(B2B, B) if args.idt_loss is not None else 0
+                        cyc_loss = args.cyc_loss(A2B2A, A) + args.cyc_loss(B2A2B, B)
+                        istn_val_loss = gan_loss + (0.5 * args.cyc_weight * idt_loss) + (args.cyc_weight * cyc_loss)
+
+                        ##### CALCULATE DISCRIMINATOR LOSSES #####
+                        output_Dis_A_A = discriminator_A(A.detach(), return_logits=0)
+                        output_Dis_A_A = output_Dis_A_A.view(A.size(0), -1)
+                        Dis_A_High = high.sample(output_Dis_A_A.shape).to(device)
+                        discriminator_A_A_loss = args.dis_loss(output_Dis_A_A, Dis_A_High)
+
+                        output_Dis_A_B2A = discriminator_A(B2A.detach(), return_logits=0)
+                        output_Dis_A_B2A = output_Dis_A_B2A.view(B2A.size(0), -1)
+                        Dis_A_B2A_Low = low.sample(output_Dis_A_B2A.shape).to(device)
+                        discriminator_A_B2A_loss = args.dis_loss(output_Dis_A_B2A, Dis_A_B2A_Low)
+
+                        output_Dis_B_B = discriminator_B(B.detach(), return_logits=0)
+                        output_Dis_B_B = output_Dis_B_B.view(B.size(0), -1)
+                        Dis_B_High = high.sample(output_Dis_B_B.shape).to(device)
+                        discriminator_B_B_loss = args.dis_loss(output_Dis_B_B, Dis_B_High)
+
+                        output_Dis_B_A2B = discriminator_A(A2B.detach(), return_logits=0)
+                        output_Dis_B_A2B = output_Dis_B_A2B.view(A2B.size(0), -1)
+                        Dis_B_A2B_Low = low.sample(output_Dis_B_A2B.shape).to(device)
+                        discriminator_B_A2B_loss = args.dis_loss(output_Dis_B_A2B, Dis_B_A2B_Low)
+
+                        discriminator_A_val_loss = 0.5 * (discriminator_A_A_loss + discriminator_A_B2A_loss)
+                        discriminator_B_val_loss = 0.5 * (discriminator_B_B_loss + discriminator_B_A2B_loss)
+
+                        ##### Get TASK MODEL Outputs #####
+                        output_task_A_batch, error_A_batch, _, _ = get_task_output(task, A_orig, label_A)
+                        output_task_B_batch, error_B_batch, _, _ = get_task_output(task, B_orig, label_B)
+                        output_task_A2B_batch, error_A2B_batch, _, _ = get_task_output(task, A2B_orig.detach(), label_A)
+                        # Only update the task model based on the transformed output
+                        task_val_loss = args.task_loss(output_task_A2B_batch, label_A.float())
 
                         total_istn_val_loss += istn_val_loss.item()
-                        total_discriminator_val_loss += discriminator_val_loss.item()
+                        total_discriminator_A_val_loss += discriminator_A_val_loss.item()
+                        total_discriminator_B_val_loss += discriminator_B_val_loss.item()
                         total_task_val_loss += task_val_loss.item()
 
                         num_images_val_A += A_orig.size(0)
@@ -404,11 +530,13 @@ def train(args, config, remote=False):
 
                     ##### Populate Logs
                     total_istn_val_loss = total_istn_val_loss / num_images_val_A
-                    total_discriminator_val_loss = total_discriminator_val_loss / num_images_val_A
+                    total_discriminator_A_val_loss = total_discriminator_A_val_loss / num_images_val_A
+                    total_discriminator_B_val_loss = total_discriminator_B_val_loss / num_images_val_A
                     total_task_val_loss = total_task_val_loss / num_images_val_A
 
                     loss_val_istn_log.append(total_istn_val_loss)
-                    loss_val_discriminator_log.append(total_discriminator_val_loss)
+                    loss_val_discriminator_A_log.append(total_discriminator_A_val_loss)
+                    loss_val_discriminator_B_log.append(total_discriminator_B_val_loss)
                     loss_val_task_log.append(total_task_val_loss)
 
                     error_val_A = error_val_A / num_images_val_A
@@ -426,9 +554,10 @@ def train(args, config, remote=False):
                         error_val_A_base = error_val_A_base / num_images_val_A_base
                         error_val_B_base = error_val_B_base / num_images_val_B_base
 
-                    logging.info('VAL Epo:{:3d} A0/A/A2B[{:.4f}/{:.4f}/{:.4f}] B0/B/Del[{:.4f}/{:.4f}/{:.4f}] Best[B]:[{:.4f}]'
-                                 .format(epoch,
+                    logging.info('VAL Epo:{:3d} {}[A0/A/A2B]:[{:.4f}/{:.4f}/{:.4f}] {}[B0/B/Del]:[{:.4f}/{:.4f}/{:.4f}] Best[B]:[{:.4f}]'
+                                 .format(epoch, 'MAE' if args.model_type=='regressor' else 'Acc',
                                          error_val_A_base, error_val_A, error_val_A2B,
+                                         'MAE' if args.model_type == 'regressor' else 'Acc',
                                          error_val_B_base, error_val_B, np.abs(error_val_B_base - error_val_B),
                                          best_val_error[1]))
 
@@ -440,10 +569,12 @@ def train(args, config, remote=False):
 
                     if better_than_before:
                         printhead('NEW BEST VAL A2B:{:3d} Prev [{:.5f}] New [{:.5f}] ...saving model'
-                            .format(epoch, best_val_error[1], error_val_A2B))
+                                  .format(epoch, best_val_error[1], error_val_A2B))
                         torch.save(itn_A2B.state_dict(), os.path.join(args.model_dir,'val_err_{:.5f}_epoch_{:03d}_itn_A2B.pt'.format(error_val_A2B, epoch)))
+                        torch.save(itn_B2A.state_dict(), os.path.join(args.model_dir, 'val_err_{:.5f}_epoch_{:03d}_itn_B2A.pt'.format(error_val_A2B, epoch)))
                         if args.stn:
                             torch.save(stn_A2B.state_dict(), os.path.join(args.model_dir,'val_err_{:.5f}_epoch_{:03d}_stn_A2B.pt'.format(error_val_A2B, epoch)))
+                            torch.save(stn_B2A.state_dict(), os.path.join(args.model_dir, 'val_err_{:.5f}_epoch_{:03d}_stn_B2A.pt'.format(error_val_A2B, epoch)))
                         torch.save(task.state_dict(), os.path.join(args.model_dir, 'val_err_{:.5f}_epoch_{:03d}_{}_A2B.pt'.format(error_val_A2B, epoch, args.model_type)))
                         early_stopping_counter = 0
                         best_val_error = [epoch, error_val_A2B]
@@ -461,9 +592,11 @@ def train(args, config, remote=False):
 
     ##### After the training loop - save the final models
     ### NOTE: May not be the best models - this just saves the final epoch step just in case it's needed.
-    torch.save(itn_A2B.state_dict(), os.path.join(args.model_dir, 'itn.pt'))
+    torch.save(itn_A2B.state_dict(), os.path.join(args.model_dir, 'itn_A2B.pt'))
+    torch.save(itn_B2A.state_dict(), os.path.join(args.model_dir, 'itn_B2A.pt'))
     if args.stn:
-        torch.save(stn_A2B.state_dict(), os.path.join(args.model_dir, 'stn.pt'))
+        torch.save(stn_A2B.state_dict(), os.path.join(args.model_dir, 'stn_A2B.pt'))
+        torch.save(stn_B2A.state_dict(), os.path.join(args.model_dir, 'stn_B2A.pt'))
     torch.save(task.state_dict(), os.path.join(args.model_dir, '{}.pt'.format(args.model_type)))
 
     printhead('Finished TRAINING.')
@@ -471,9 +604,12 @@ def train(args, config, remote=False):
     plot_metric({'ISTN Train': [loss_train_istn_log, range(len(loss_train_istn_log))],
                'ISTN Val': [loss_val_istn_log, val_epochs]},
               'ISTN Losses', 'Loss', args)
-    plot_metric({'Dis Train': [loss_train_discriminator_log, range(len(loss_train_discriminator_log))],
-               'Dis Val': [loss_val_discriminator_log, val_epochs]},
-              'Discriminator Losses', 'Loss', args)
+    plot_metric({'Dis A Train': [loss_train_discriminator_A_log, range(len(loss_train_discriminator_A_log))],
+               'Dis A Val': [loss_val_discriminator_A_log, val_epochs]},
+              'Discriminator A Losses', 'Loss', args)
+    plot_metric({'Dis B Train': [loss_train_discriminator_B_log, range(len(loss_train_discriminator_B_log))],
+               'Dis B Val': [loss_val_discriminator_B_log, val_epochs]},
+              'Discriminator B Losses', 'Loss', args)
     plot_metric({'Task Train': [loss_train_task_log, range(len(loss_train_task_log))],
                'Task Val': [loss_val_task_log, val_epochs]},
               'Task Losses', 'Loss', args)
@@ -500,7 +636,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Domain Adaptation with Adversarial Training of ISTN')
     parser.add_argument('--dev', default='0', help='cuda device (default: 0)')
     parser.add_argument('--seed', type=int, default=42, help='random seed (default: 42)')
-    parser.add_argument('--config', default="config/config_train.json", help='config file')
+    parser.add_argument('--config', default="./config/config_train_bidirectional.json", help='config file')
     parser.add_argument('--output_dir', default='./output', help='output root directory')
     parser.add_argument('--num_dataset_workers', type=int, default=4, help='number of worker to use for each dataset.')
     parser.add_argument('--B2A', action='store_true', help='swap siteA and siteB')
@@ -573,8 +709,9 @@ if __name__ == '__main__':
     assert (config['idt_loss'] in loss_functions.keys())
 
     args.gan_loss = loss_functions[config['gan_loss']]
-    args.idt_loss = loss_functions[config['idt_loss']]
     args.dis_loss = loss_functions[config['dis_loss']]
+    args.idt_loss = loss_functions[config['idt_loss']]
+    args.cyc_loss = loss_functions[config['cyc_loss']]
 
     if args.model_type == 'regressor':
         args.task_loss = torch.nn.MSELoss()
@@ -593,11 +730,11 @@ if __name__ == '__main__':
     ### OUTPUT OPTIONS
     args.class_names = '{}_{}'.format(config['siteA_name'], config['siteB_name'])
 
-    args.out = '{}_{}_STN_{}'.format('DA_{}_{}'.format(args.model_type, args.label_key),
+    args.out = '{}_{}_STN_{}'.format('BiDA_{}_{}'.format(args.model_type, args.label_key),
                                      args.class_names,
                                      str(args.stn) if args.stn else 'NONE')
 
-    args.params = '_L_{}_E_{:d}_B_{:d}_{}Cyc_{}_GL_{}_IL_{}_DL_{}_A_{}'.format(args.learning_rate,
+    args.params = '_L_{}_E_{:d}_B_{:d}_{}_Cyc_{}_GL_{}_IL_{}_DL_{}_A_{}'.format(args.learning_rate,
                                                                                           args.epochs,
                                                                                           args.batch_size,
                                                                                           '' if args.stn != 'bspline' else 'Sp_{}_MaxD_{}_'.format(args.cp_spacing[0],

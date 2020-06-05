@@ -5,9 +5,9 @@
   "siteB_name": "UKBB",
   "siteB_train": "./data/ukbb/filenames_train.tsv",
   "siteB_val": "./data/ukbb/filenames_test.tsv",
-  "task_model": 0
+  "task_model": 0,
   "finetune": 0,
-  "label_key": "age",
+  "label_key": "sex",
   "augmentation": 1,
   "normalizer": "tanh",
   "input_shape": [64, 64, 64],
@@ -19,11 +19,12 @@
   "early_stopping_epochs": 10,
   "learning_rate": 0.0001,
   "cyc_weight": 50,
-  "batch_size": 16,
+  "batch_size": 10,
   "val_interval": 5,
-  "epochs": 50,
+  "epochs": 5,
   "gan_loss": "bce",
-  "idt_loss": "l1",
   "dis_loss": "bce",
-  "files": ["config/config_train.json", "models/itn.py", "models/stn.py", "models/task_models.py", "datasets.py", "da_adversarial_training.py"]
+  "idt_loss": "l1",
+  "cyc_loss": "l1",
+  "files": ["config/config_train_bidirectional.json", "models/itn.py", "models/stn.py", "models/task_models.py", "datasets.py", "da_adversarial_training.py"]
 }
