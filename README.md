@@ -15,7 +15,7 @@ It was originally used to transform between Brain MRI from two different sites (
 
 If you intend to use this work please cite the pre-print available at::
 
-Robinson, R. et al. (2020). _Image-level Harmonization of Multi-Site Data using Image-and-Spatial Transformer Networks._ MICCAI 2020. https://arxiv.org/XXXXXXXX
+Robinson, R. et al. (2020). _Image-level Harmonization of Multi-Site Data using Image-and-Spatial Transformer Networks._ MICCAI 2020. https://arxiv.org/abs/2006.16741
 
 
 ---
