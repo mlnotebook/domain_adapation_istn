@@ -240,8 +240,8 @@ def train(args, config, remote=False):
                 B2A_orig = B2A.clone()
 
                 ### Identity ISTN ###
-                A2A = itn_A2B(A.detach())
-                A2A = stn_A2B(A2A.to(device)) if args.stn else A2A
+                A2A = itn_B2A(A.detach())
+                A2A = stn_B2A(A2A.to(device)) if args.stn else A2A
                 A2A_orig = A2A.clone()
 
                 B2B = itn_A2B(B.detach())
